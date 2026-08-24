@@ -22,6 +22,13 @@ type Params struct {
 	Humanize  bool
 }
 
+var (
+	healthOKStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	healthWarnStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	healthErrStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+	healthIdleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+)
+
 func Render(p Params) string {
 	prevMap := make(map[string]shared.ComponentMetrics, len(p.PrevComps))
 	for _, c := range p.PrevComps {
@@ -29,7 +36,7 @@ func Render(p Params) string {
 	}
 
 	var b strings.Builder
-	b.WriteString(headerStyle.Render(fmt.Sprintf(" %-4s %-24s %-7s %10s %10s %s", "#", "Component", "Kind", "Rec/s", "Bytes/s", "Extra")))
+	b.WriteString(headerStyle.Render(fmt.Sprintf(" %-4s %-1s %-24s %-7s %10s %10s %s", "#", "", "Component", "Kind", "Rec/s", "Bytes/s", "Extra")))
 	b.WriteString("\n")
 	b.WriteString(strings.Repeat("─", p.Width))
 	b.WriteString("\n")
@@ -73,7 +80,11 @@ func Render(p Params) string {
 			}
 		}
 
-		row := fmt.Sprintf(" %-4d %-24s %-7s %10s %10s %s", i+1, c.ID, c.Kind, recRate, byteRate, extra)
+		// Health badge
+		health := shared.ComponentHealth(c, prevMap[c.ID])
+		badge := healthBadge(health)
+
+		row := fmt.Sprintf(" %-4d %-1s %-24s %-7s %10s %10s %s", i+1, badge, c.ID, c.Kind, recRate, byteRate, extra)
 		if i == p.Cursor {
 			row = selectedStyle.Render(row)
 		}
@@ -94,5 +105,20 @@ func sectionName(k shared.Kind) string {
 		return "OUTPUTS"
 	default:
 		return "ALL"
+	}
+}
+
+func healthBadge(h shared.Health) string {
+	switch h {
+	case shared.HealthOK:
+		return healthOKStyle.Render("●")
+	case shared.HealthWarning:
+		return healthWarnStyle.Render("▲")
+	case shared.HealthError:
+		return healthErrStyle.Render("✖")
+	case shared.HealthIdle:
+		return healthIdleStyle.Render("○")
+	default:
+		return " "
 	}
 }

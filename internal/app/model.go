@@ -6,6 +6,7 @@ import (
 
 	"fbtop/internal/api"
 	"fbtop/internal/detail"
+	"fbtop/internal/diagview"
 	"fbtop/internal/footer"
 	"fbtop/internal/header"
 	"fbtop/internal/shared"
@@ -27,6 +28,7 @@ type Model struct {
 	cursor     int
 	humanize   bool
 	showDetail bool
+	showDiag   bool
 	sortCol    shared.SortCol
 	sortAsc    bool
 	filterKind shared.Kind
@@ -38,6 +40,8 @@ func New(url string, interval time.Duration, humanize bool, sortCol shared.SortC
 		url:        url,
 		interval:   interval,
 		humanize:   humanize,
+		showDetail: true,
+		showDiag:   true,
 		sortCol:    sortCol,
 		sortAsc:    sortAsc,
 		filterKind: filterKind,
@@ -107,6 +111,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showDetail = !m.showDetail
 		case "esc":
 			m.showDetail = false
+		case "d":
+			m.showDiag = !m.showDiag
 		}
 	}
 	return m, nil
@@ -125,30 +131,62 @@ func (m Model) View() tea.View {
 		return v
 	}
 
+	showDetail := m.showDetail && len(m.filteredAndSorted()) > 0
+
+	tableW := m.width
+	rightW := 0
+	if showDetail && m.width > 100 {
+		rightW = m.width * 2 / 5
+		tableW = m.width - rightW
+	} else if showDetail {
+		rightW = m.width / 2
+		tableW = m.width - rightW
+	}
+
 	comps := m.filteredAndSorted()
 
-	parts := []string{
-		header.Render(m.state, m.url, m.width),
+	// Header
+	headerLine := header.Render(m.state, m.url, m.width)
+
+	// Left pane: table + diagnostics stacked vertically
+	leftParts := []string{
 		tableview.Render(tableview.Params{
 			Comps:     comps,
 			PrevComps: m.state.PrevComps,
-			Width:     m.width,
+			Width:     tableW,
 			Cursor:    m.cursor,
 			Humanize:  m.humanize,
 		}),
 	}
+	if m.showDiag {
+		diags := shared.AnalyzeDiagnostics(m.state, m.state.PrevComps)
+		leftParts = append(leftParts, diagview.Render(diags, tableW))
+	}
+	leftContent := lipgloss.JoinVertical(lipgloss.Top, leftParts...)
 
-	if m.showDetail && len(comps) > 0 {
+	// Right pane: detail only
+	rightContent := ""
+	if showDetail {
 		idx := m.cursor
 		if idx >= len(comps) {
 			idx = len(comps) - 1
 		}
-		parts = append(parts, detail.Render(comps[idx]))
+		prev := prevComp(comps[idx].ID, m.state.PrevComps)
+		rightContent = detail.Render(comps[idx], prev, rightW)
 	}
 
-	parts = append(parts, footer.Render(m.sortCol.String(), m.filterKind.String(), m.humanize, m.width))
+	// Main area
+	var main string
+	if rightContent != "" {
+		main = lipgloss.JoinHorizontal(lipgloss.Top, leftContent, rightContent)
+	} else {
+		main = leftContent
+	}
 
-	v.SetContent(lipgloss.JoinVertical(lipgloss.Top, parts...))
+	// Footer
+	foot := footer.Render(m.sortCol.String(), m.filterKind.String(), m.humanize, m.showDiag, m.width)
+
+	v.SetContent(lipgloss.JoinVertical(lipgloss.Top, headerLine, main, foot))
 	return v
 }
 
@@ -161,4 +199,13 @@ func (m Model) filteredAndSorted() []shared.ComponentMetrics {
 	}
 	shared.SortBy(comps, m.sortCol, m.sortAsc)
 	return comps
+}
+
+func prevComp(id string, prevComps []shared.ComponentMetrics) shared.ComponentMetrics {
+	for _, c := range prevComps {
+		if c.ID == id {
+			return c
+		}
+	}
+	return shared.ComponentMetrics{}
 }
